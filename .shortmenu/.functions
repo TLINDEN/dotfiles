@@ -1,0 +1,9 @@
+
+finish() {
+  ps axuw | egrep 'dolphin|emacs|opera|firefox|chrome' | grep -v grep | awk '{print $2}' | while read PID; do
+    if test -n "$PID"; then kill $PID; fi
+  done
+  fusermount -u ~/Data/Tom-Dokumente
+  echo 0
+}
+

@@ -1,0 +1,8 @@
+#/bin/sh
+
+service network-manager stop
+ifconfig wlan0 down
+pid=`ps axuw|grep wpa_sup | grep -v grep | awk '{print $2}'` 
+if test -n "$pid"; then
+  kill $pid
+fi

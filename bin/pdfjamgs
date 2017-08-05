@@ -1,0 +1,269 @@
+#!/bin/sh
+#
+#    This is pdfjamgs, a utility which does pdfjam's job using ghostscript.
+#
+#    Copyright (C) 2013 T.v.Dein.
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#  
+
+
+version() {
+    echo "This is pdfjamgs version $VERSION" >&2
+    echo "Copyright (c) 2013 T.v.Dein" >&2
+    echo "Published under the terms of the GPLv3" >&2
+}
+
+usage() {
+    echo
+    version
+    echo
+    cat <<'EOF'
+Usage: pdfjamgs [-iovhdp]
+
+Available options:
+-v                   Print script version.
+-h                   Print the help text.
+-d                   Enable debug output.
+-i <file:pages>      Specify the input file and the pages to extract.
+                     The pages must be specified as a comma separated
+                     list of numbers, ranges are supported as well.
+                     Examples:
+                     -i foo.pdf:1,3,4  extract page 1, 3 and 4.
+                     -i foo.pdf:2-6,9  extract page 2 to 6 and page 9.
+-o <file>            Specify the output file. This parameter is
+                     optional. If you omit it, the extracted pages
+                     will be written to the current directory as
+                     separate pdf files.
+-p                   Print the number of pages of the input file.
+-O <l[andscape] | p[ortrait]>
+                     Convert each page to the given orientation.
+EOF
+>&2
+
+    exit
+}
+
+ec() {
+    if test -n "$debug"; then
+	echo "DEBUG: $@" >&2
+    fi
+    "$@" || die "Failed to execute ghostscript"
+}
+
+cleanup () {
+    rm -rf $TMP
+}
+
+die () {
+    m="$1"
+    echo "$m"
+    cleanup
+    exit 1
+}
+
+isnum () {
+    N="$1"
+    if ! echo "${N}" | egrep '^[0-9]*$' > /dev/null 2>&1; then
+	die "Error: ${N} is not a number!"
+    fi
+}
+
+ismore () {
+    N="$1"
+    MAX="$2"
+    if test $N -gt $MAX; then
+	die "Error: page $N is greater as the total number of pages $MAX"
+    fi
+}
+
+ispdf () {
+    gs $gsopts $ifopts -f "$@" > /dev/null 2>&1
+}
+
+getpages () {
+    gs -q -dNODISPLAY -c "($@) (r) file runpdfbegin pdfpagecount = quit"
+}
+
+dissectpdf () {
+    pagecount="$1"
+    pages="$2"
+    shift
+    shift
+
+    for page in $pages; do
+	if echo "$page" | egrep -- "-" > /dev/null; then
+	    from=`echo "$page" | awk -F '-' '{print $1}'`
+	    to=`echo "$page" | awk -F '-' '{print $2}'`
+	    isnum "${from}"
+	    isnum "${to}"
+	    ismore ${from} ${pagecount}
+	    ismore ${to} ${pagecount}
+	    of=`printf "p_%04d_%06d_%6d.pdf" ${pos} ${from} ${to}`
+	    ec gs ${gsopts} ${gsorientopts} -dFirstPage=${from} -dLastPage=${to} \
+		-sOutputFile=${TMP}/${of} -f "$@"
+	else
+	    isnum "${page}"
+	    ismore ${page} ${pagecount}
+	    of=`printf "p_%04d_%06d.pdf" ${pos} ${page}`
+	    ec gs ${gsopts} ${gsorientopts} -dFirstPage=${page} -dLastPage=${page} \
+		-sOutputFile=${TMP}/${of} -f "$@"
+	fi
+    done
+    pos=$(($pos+1))
+}
+
+# ghostscript must be installed
+if ! gs -v > /dev/null 2>&1; then
+    echo "Ghostscript is not installed!"
+    exit 1
+fi
+
+VERSION=0.0.1
+pos=0
+sources=""
+infile=""
+outfile=""
+debug=""
+dissect=""
+docount=""
+tempfoo=`basename $0`
+TMP=`mktemp -d -t ${tempfoo}` || exit 1
+MFS="====="
+orient=""
+
+while getopts ":i:o:vhdpO:" o; do
+    case "$o" in
+        v)
+	    version
+            exit 1
+            ;;
+        h)
+	    usage
+	    ;;
+	d)
+	    debug=1
+	    ;;
+	i)
+	    if test -n "${infile}"; then
+		infile="${infile}${MFS}${OPTARG}"
+	    else
+		infile="$OPTARG"
+	    fi
+	    ;;
+	o)
+	    outfile="$OPTARG"
+	    ;;
+	p)
+	    docount=1
+	    ;;
+	O)
+	    orient="$OPTARG"
+	    ;;
+        *)
+	    echo "Error: unknown parameter"
+	    usage
+	    ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if test $? != 0 ; then
+    echo "Error: parameter parsing problem" >&2
+    usage
+fi
+
+if test -z "$infile"; then
+    echo "Error: parameter -i missing" >&2
+    usage
+fi
+
+if test -z "$outfile"; then
+    dissect=1
+else
+    # check write permissions
+    dir=`dirname "${outfile}"`
+    if test ! -w "$dir"; then
+	die "Error: could not write to $dir"
+    fi
+fi
+
+ifopts="-dFirstPage=1 -dLastPage=1 -sOutputFile=/dev/null"
+gsopts="-dNOPAUSE -dBATCH -sDEVICE=pdfwrite"
+if test -z "$debug"; then
+    gsopts="${gsopts} -q"
+fi
+sources=""
+
+gsorientopts=""
+if test -n "$orient"; then
+    if echo "$orient" | egrep "^p" > /dev/null 2>&1; then
+	gsorientopts="-dAutoRotatePages=/None -c '<</Orientation 0>> setpagedevice'"
+    else
+	gsorientopts="-dAutoRotatePages=/None -c '<</Orientation 3>> setpagedevice'"
+    fi
+fi
+
+
+
+
+echo "${infile}" \
+    | awk -F"$MFS" 'BEGIN{OFS="\n"}{$1=$1; print }' \
+    | while read FILE; do
+
+    pages=`echo "$FILE" | awk -F: '{print $2}' | sed 's/,/ /g'`
+    FILE=`echo "$FILE" | awk -F: '{print $1}'`
+
+    if test ! -s "$FILE"; then
+	die "$FILE doesn't exist or is empty!"
+    fi
+
+    # check if we're really working with a pdf
+    if ! ispdf "$FILE"; then
+	die "Error: Input file ${FILE} is probably not a pdf file"
+    fi
+
+    # count the pages
+    pagecount=`getpages "${FILE}"`
+
+    if test -n "$docount"; then
+	echo "${FILE} has ${pagecount} pages."
+    else
+        dissectpdf "${pagecount}" "${pages}" "${FILE}"
+    fi
+done
+
+[ $? == 1 ] && exit 0;
+
+
+if test -z "$docount"; then
+    sources=`ls ${TMP}/*.pdf`
+    if test -z "$dissect"; then
+        # create the output
+	ec gs ${gsopts} -sOutputFile="${outfile}" ${sources}
+	echo "Created ${outfile}."
+    else
+        # copy the dissected pages to current location
+	pfiles=""
+	for F in ${sources}; do
+	    ec cp $F .
+	    pfiles="${pfiles} `basename ${F}`"
+	done
+	echo "Pages from written to current directory:"
+	echo $pfiles
+    fi
+fi
+
+cleanup

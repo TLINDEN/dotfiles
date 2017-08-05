@@ -1,0 +1,36 @@
+#!/usr/bin/perl
+#
+
+
+use strict;
+use POSIX ":sys_wait_h";
+
+my $minus = shift;
+my $plus = 1;
+my $mute = 0;
+
+if ($minus eq '-') {
+  $plus = 0;
+}
+elsif ($minus eq "0") {
+  $mute = 1;
+}
+else {
+  $plus = 1;
+}
+
+if($plus) {
+    system("amixer -D pulse sset Master 5%+");
+}
+elsif($mute) {
+    system("amixer -D pulse sset Master toggle");
+}
+else {
+    system("amixer -D pulse sset Master 5%-");
+}
+
+
+1;
+
+
+

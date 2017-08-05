@@ -1,0 +1,35 @@
+#!/bin/sh
+
+pidfile=$HOME/tmp/dnstunnel.pid
+client=/usr/local/bin/dns2tcpc
+
+stoptun() {
+    killall /usr/local/bin/dns2tcpc
+}
+
+forktun() {
+    start-stop-daemon -b --pidfile $pidfile --exec $client --start -- -c
+    echo $?
+}
+
+proxy() {
+    ret=`forktun`
+    sleep 2
+    if test $ret -eq 0; then
+	    # dns2tcp is already running
+	    # or we could start it anew
+	    echo "Running proxy:localhost:3128, ssh:localhost:2244 ..."
+	    ssh -p 2222 -L 3128:172.16.0.1:3128 -L 2244:172.16.0.1:5222 localhost sleep 31283128
+    else
+	    echo "Failed to fork dns2tcpc, waiting for retry..."
+	    sleep 10
+    fi
+}
+
+
+trap 'stoptun; (exit $?); exit' 1 2 13 15
+
+
+while :; do
+    proxy
+done

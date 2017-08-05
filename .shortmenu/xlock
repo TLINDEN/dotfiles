@@ -1,0 +1,8 @@
+#!/bin/sh
+runs=`pidof /usrocal/bin/xscreensaver`
+if test -z "$runs"; then
+    /usr/bin/xscreensaver &
+    sleep 2
+fi
+
+exec /usr/bin/xscreensaver-command -lock

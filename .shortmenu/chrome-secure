@@ -1,0 +1,2 @@
+#!/bin/sh
+exec firejail --seccomp --caps.drop=all --debug --name=ff --private google-chrome

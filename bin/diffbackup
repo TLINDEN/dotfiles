@@ -1,0 +1,573 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use DB_File;
+use File::Find;
+use File::Path qw(mkpath remove_tree);
+use File::Spec::Functions qw(catpath file_name_is_absolute);
+use File::Copy;
+use FileHandle;
+use Archive::Zip qw( :ERROR_CODES :CONSTANTS );
+use Data::Dumper;
+use POSIX qw(strftime);
+use Sys::Hostname;
+use Storable qw(freeze thaw);
+
+use strict;
+use warnings;
+no strict 'subs';
+
+our ($dst, @include, @exclude, %found, $version, %db, $o_h, $o_v,
+     $verbose, $zip, $zipfile, $logfh, $archive, $debug, $restore, $restore_target,
+     %rzips, $nodie, $list, $targetdir, $ts, @cmd
+    );
+
+
+
+sub usage {
+  print STDERR q(
+usage: $0 [-hvsidnVztrl]
+
+Backup Options:
+ --include -i <dir>    Directories to backup, may occur multiple times.
+ --exclude -e <regex>  Directory or file to ignore, may occur multiple times.
+ --dst -d <dir>        Target directory where to save backups.
+ --zip -z              Create zip archives instead of copying.
+
+Restore Options:
+ --restore -r <ts>     Restore from backup made on timestamp <ts>.
+ --target -t <dir>     Directory where to restore to, default origin.
+
+Lookup Options:
+ --list -l [<ts>]      If no timestamp <ts> given, list snapshots (timestamps)
+                       otherwise list files backed up on <ts>. if -v
+                       is set, show all files of snapshot <ts>. Requires -d.
+
+General Options:
+ --nodie -n            Don't exit on errors
+ --help -h -?          Print help
+ --version -V          Print version
+ --verbose -v          Be verbose during operations
+ --debug               Print debugging
+
+Notes:
+ The destination directory --dst may contain format characters (see: man strftime).
+ E.g. if executed daily with -d /backups/%m then 12 full backups will be made on
+ the first of each month differential backups on the other days.
+);
+  exit 1;
+}
+
+sub dbstart {
+  my ($dbfile, $dbcfg)  = @_;
+  tie my %a, "DB_File", $dbfile, O_RDWR|O_CREAT, 0666, $DB_HASH  or die "Could not open dbfile $dbfile: $!\n";
+  tie my %b, "DB_File", $dbcfg,  O_RDWR|O_CREAT, 0666, $DB_HASH  or die "Could not open dbfile $dbcfg: $!\n";
+
+  return ( files => \%a, state => \%b );
+}
+
+sub dbstop {
+  my %db = @_;
+  untie %{$db{files}};
+  untie %{$db{state}};
+}
+
+sub debug {
+  if ($debug) {
+    my $m = shift;
+    print "$m\n";
+  }
+}
+
+sub exclude {
+  my($file) = @_;
+  return grep { $file =~ m|$_| } @exclude;
+}
+
+sub work {
+  my $file = $File::Find::name;
+  my $dir  = $File::Find::dir;
+
+  if (-f $file) {
+    $found{$file} = 1;
+    my $target = File::Spec->catdir($targetdir, $dir);
+
+    if (! exists $db{files}->{$file}) {
+      if (! exclude($file)) {
+	backupfile($file, $dir, $target);
+      }
+      else {
+	debug("exclude $file");
+      }
+    }
+    else {
+      check($file, $dir, $target);
+    }
+  }
+}
+
+
+sub check {
+  my($file, $dir, $target) = @_;
+
+  my %attr    = getfileattr($file);
+  my $attr    = getattrstr(%attr);
+  my %oldattr = getdbattr($file);
+
+  if ($oldattr{sha} ne $attr) {
+    if (! exclude($file)) {
+      backupfile($file, $dir, $target);
+    }
+    else {
+      debug("exclude $file");
+    }
+  }
+}
+
+sub getts {
+  my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+  return sprintf "%04d-%02d-%02d-%02d.%02d", $year+1900, $mon+1, $mday, $hour, $min;
+}
+
+sub bailout {
+  my $msg = shift;
+  if ($nodie) {
+    return;
+  }
+  else {
+    print STDERR $msg;
+    exit 1;
+  }
+}
+
+sub openlogger {
+  my $logfile = shift;
+  $logfh = FileHandle->new;
+  $logfh->open(">> $logfile") or die "Could not create logfile $logfile: $!\n";
+}
+
+sub logger {
+  my $msg = shift;
+  my $tell = sprintf  "%s %s %s\n", scalar localtime(time), $0, $msg;
+  printf $logfh $tell;
+  if ($verbose) {
+    print $tell;
+  }
+}
+
+
+sub getfileattr {
+  my $file = shift;
+
+  my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks)
+    = stat($file);
+
+  return (
+	  mode  => $mode,
+	  uid   => $uid,
+	  gid   => $gid,
+	  mtime => $mtime,
+	  size  => $size
+	  );
+}
+
+sub getattrstr {
+  my %attr = @_;
+  return  join ',', sort values %attr;
+}
+
+sub backupfile {
+  my ($file, $dir, $target) = @_;
+
+  if ($zip) {
+    my $m = $archive->addFile($file);
+  }
+  else {
+    if (! -d $target) {
+      mkpath($target) or bailout("Could not create target directory $target: $!\n");
+    }
+    copy($file, $target) or bailout("Could not copy file $file to directory $target: $!\n");
+  }
+
+  add2db($file, $dir, $target);
+}
+
+sub add2db {
+  my($file, $dir, $target) = @_;
+  my %attr = getfileattr($file);
+  my $sha  = getattrstr(%attr);
+
+  my %data = ( sha => $sha, dir => $dir, ts => $ts, %attr );
+
+  if ($zip) {
+    $data{zipfile} = $zipfile;
+  }
+  else {
+    my ($volume,$directories,$sfile) = File::Spec->splitpath( $file );
+    my $savepath = File::Spec->catdir($target, $sfile);
+    $data{location} = $savepath;
+  }
+
+  $db{files}->{$file} = freeze \%data;
+
+  logger("$sha $file saved");
+}
+
+sub getdbattr {
+  my $file = shift;
+  my %attr = %{ thaw($db{files}->{$file}) };
+  return %attr;
+}
+
+sub cleandb {
+  my $count = 0;
+  my @del;
+
+  foreach my $file (keys %{$db{files}}) {
+    if (! exists $found{$file}) {
+      # file has been removed, forget about it
+      if ($verbose) {
+	print "$file doesn't exist anymore or is no more being watched, deleting from db\n";
+      }
+      delete $db{files}->{$file};
+    }
+    else {
+      $count++;
+    }
+  }
+
+  return $count;
+}
+
+sub savedbconfig {
+  my %t = (files => shift, ctime => time, cmd => "$0 @cmd", uid => $>, hostname => hostname() );
+  foreach my $k (keys %t) {
+    $db{state}->{$k} = $t{$k};
+  }
+}
+
+sub storezipfile {
+  my @members = $archive->members();
+  if ($debug) {
+    print Dumper(\@members);
+  }
+  if (scalar @members > 0) {
+    unless ( $archive->writeToFileNamed($zipfile) == AZ_OK ) {
+      die "Could not write archive file $zipfile: $!\n";
+    }
+    logger("archive $zipfile created");
+  }
+  else {
+    logger("nothing to backup");
+  }
+}
+
+sub getzipmember {
+  my($zipfile, $file) = @_;
+  my $arch;
+
+  if (exists $rzips{$zipfile}) {
+    $arch = $rzips{$zipfile}->{arch};
+  }
+  else {
+    $arch = Archive::Zip->new();
+    unless ( $arch->read( $zipfile ) == AZ_OK ) {
+      bailout "Could not open archive $zipfile: $!\n";
+    }
+    $rzips{$zipfile}->{arch} = $arch;
+  }
+
+  my $filename = $file;
+  $filename =~ s|^/||;
+  return $arch->memberNamed( $filename );
+}
+
+sub restore {
+  my($rdir, $to) = @_;
+
+  my $logfile   = File::Spec->catfile( $rdir, 'restore.log');
+  openlogger($logfile);
+
+  my $dbfile = File::Spec->catfile( $rdir, 'checksums.dbmdeep');
+  my $dbcfg  = File::Spec->catfile( $rdir, 'checksums.cfg');
+  %db = dbstart($dbfile, $dbcfg);
+  my ($targetdir, $targetfile, %zips);
+
+  foreach my $file (keys %db) {
+    my %attr = getdbattr($file);
+    if ($to) {
+      $targetdir = File::Spec->catdir($to, $attr{dir});
+      my ($volume,$directories,$sfile) = File::Spec->splitpath( $file );
+      $targetfile = File::Spec->catfile($targetdir, $sfile);
+    }
+    else {
+      $targetdir = $attr{dir};
+      $targetfile = $file;
+    }
+    if (!-d $targetdir) {
+      mkpath($targetdir);
+    }
+
+    if (exists $attr{location}) {
+      # copied file
+      copy($attr{location}, $targetdir)
+	or bailout("Could not copy file $attr{location} to directory $targetdir: $!\n");
+      chmod $attr{mode}, $targetfile;
+      chown $attr{uid}, $attr{gid},  $targetfile;
+      logger("$file restored to $targetfile");
+    }
+    else {
+      # from zip file
+      my $zmember = getzipmember($attr{zipfile}, $file);
+      unless ($zmember->extractToFileNamed( $targetfile ) == AZ_OK) {
+	bailout("Could not extract $file from $attr{zipfile}!\n");
+      }
+      logger("$file extracted to $targetfile");
+    }
+  }
+
+  dbstop(%db);
+  $logfh->close();
+}
+
+sub countbygen {
+  my ($ts, %db) = @_;
+  my $count = 0;
+
+  foreach my $file (keys %{$db{files}}) {
+    my %attr = getdbattr($file);
+    if ($attr{ts} eq $ts) {
+      $count++;
+    }
+  }
+
+  return ($db{state}->{files}, $count);
+}
+
+sub listsnapshots {
+  my($dst) = @_;
+
+  print "Backup directory $dst contains snapshots:\n";
+
+  opendir D, $dst or die "Could not open dir $dst: $!\n";
+  my @entries = readdir D;
+  foreach my $entry (sort @entries) {
+    if ($entry =~ /^\d/) {
+      my $dbfile = File::Spec->catfile($dst, $entry, 'checksums.dbmdeep');
+      my $dbcfg  = File::Spec->catfile($dst, $entry, 'checksums.cfg');
+      if (-e $dbfile) {
+	%db = dbstart($dbfile, $dbcfg);
+	my ($all, $count) = countbygen($entry, %db);
+	print "Snapshot $entry stores $count files, the whole snapshot has $all files\n";
+	if ($verbose) {
+	  my $user = getpwuid($db{state}->{uid});
+	  printf "   created on %s by %s\@%s with \"%s\"\n",
+	    scalar localtime($db{state}->{ctime}),
+	    $user,
+	    $db{state}->{hostname},
+	    $db{state}->{cmd};
+	}
+	dbstop(%db);
+      }
+    }
+  }
+
+  closedir D;
+}
+
+sub showfile {
+  my %f = @_;
+
+  my $user =  getpwuid($f{uid});
+  my $group = getgrgid($f{gid});
+
+  printf "%-8s %-8s  %04o  %24s  %s\n",
+    $user, $group, $f{mode} & 07777, scalar localtime($f{mtime}), $f{name};
+
+}
+
+sub listfiles {
+  my($dst, $ts) = @_;
+
+  my $dbfile = File::Spec->catfile($dst, 'checksums.dbmdeep');
+  my $dbcfg  = File::Spec->catfile($dst, 'checksums.cfg');
+  %db = dbstart($dbfile, $dbcfg);
+
+  my ($all, $count) = countbygen($ts, %db);
+  if ($verbose) {
+    print "Snapshot $ts stores $count files, whole snapshot $all files:\n";
+  }
+  else {
+    print "Snapshot $ts stores $count files:\n";
+  }
+  printf "%-8s %-8s  %-4s  %-24s  %s\n", 'USER', 'GROUP', 'MODE', 'MTIME', 'FILE';
+
+  foreach my $file (sort keys %{$db{files}}) {
+    if ($verbose) {
+      showfile(%{$db{files}->{$file}}, name => $file);
+    }
+    else {
+      if ($db{files}->{$file}->{ts} eq $ts) {
+	showfile(%{$db{files}->{$file}}, name => $file);
+      }
+    }
+  }
+
+  dbstop(%db);
+}
+
+sub backup {
+  my($dst) = @_;
+
+  if (! -e $dst) {
+    mkpath($dst) or die "Could not create target directory $dst: $!\n";
+  }
+
+  # prepare vars
+     $ts        = getts();
+     $targetdir = File::Spec->catdir( $dst, $ts );
+  my $dbfile    = File::Spec->catfile( $dst, 'checksums.dbmdeep');
+  my $dbcfg     = File::Spec->catfile( $dst, 'checksums.cfg');
+  my $dbcopy    = File::Spec->catfile( $targetdir, 'checksums.dbmdeep');
+  my $cfgcopy   = File::Spec->catfile( $targetdir, 'checksums.cfg');
+  my $logfile   = File::Spec->catfile( $targetdir, 'backup.log');
+     $zipfile   = File::Spec->catfile( $targetdir, 'backup.zip');
+  if ($zip) {
+    $archive = Archive::Zip->new();
+  }
+
+  # keep track of checksums
+  %db = dbstart($dbfile, $dbcfg);
+
+  # this snapshot target dir
+  if (-d $targetdir) {
+    die "$targetdir already exists, $0 already running or wait a minute and retry!\n";
+  }
+  mkpath($targetdir) or die "Could not create snapshot target dir: $targetdir: $!\n";
+
+  # be reproducible
+  openlogger($logfile);
+
+  logger("backing up \"@include\" excluding \"@exclude\" to \"$dst\"");
+
+  # iterate recursivly over all files
+  # iterate over file which have to be backed up, generated in work() via find()
+  find({ wanted => \&work, follow => 0 }, @include);
+
+  if ($zip) {
+    # store the archive, if any
+    storezipfile();
+  }
+
+  # clean up the database
+  my $count = cleandb();
+
+  # save current config
+  savedbconfig($count);
+
+  # done with db
+  dbstop(%db);
+
+  # save current db state to backup dir for restore
+  logger("saving $dbfile to $dbcopy");
+  copy($dbfile, $dbcopy);
+  copy($dbcfg,  $cfgcopy);
+
+  logger("DONE");
+  $logfh->close();
+}
+
+
+
+
+#
+# main()
+
+$version = 0.02;
+$nodie = 0;
+@cmd = @ARGV;
+Getopt::Long::Configure( qw(no_ignore_case));
+if (! GetOptions (
+		  "include|i=s"  => \@include,
+		  "exclude|e=s"  => \@exclude,
+		  "dst|d=s"      => \$dst,
+		  "zip|z"        => \$zip,
+		  "restore|r=s"  => \$restore,
+		  "target|t=s"   => \$restore_target,
+		  "list|l:s"     => \$list,
+		  "version|V"    => \$o_v,
+		  "verbose|v"    => \$verbose,
+		  "debug"        => \$debug,
+		  "help|h"       => \$o_h,
+		  "nodie|n"      => \$nodie
+		 )    ) {
+  usage;
+}
+
+if ($o_h) {
+  usage;
+}
+if ($o_v) {
+  print STDERR "$0 version $version\n";
+  exit;
+}
+
+
+if (!$dst) {
+  print STDERR "-d required!\n";
+  usage;
+}
+elsif (! file_name_is_absolute($dst)) {
+  die "-d requires an absolute path name!\n";
+}
+else {
+  $dst = strftime $dst, localtime(time);
+}
+
+if ($restore) {
+  my $rdir = File::Spec->catdir($dst, $restore);
+  if (! -d $rdir) {
+    die "restore directory $rdir doesn't exist or is not readable!\n";
+  }
+  if ($restore_target) {
+    if (! -d $restore_target) {
+      mkpath($restore_target) or die "Could not create restore target directory $restore_target: $!\n";
+    }
+  }
+  else {
+    $restore_target = '';
+  }
+
+  restore($rdir, $restore_target);
+  exit 0;
+}
+elsif (defined $list) {
+  if ($list) {
+    my $ldir = File::Spec->catdir($dst, $list);
+    if (! $ldir) {
+      die "backup directory $ldir doesn't exist or is not readable!\n";
+    }
+    listfiles($ldir, $list);
+  }
+  else {
+    listsnapshots($dst);
+  }
+}
+else {
+  if (! @include) {
+    usage();
+  }
+  foreach my $dir (@include) {
+    if (! file_name_is_absolute($dir)) {
+      die "-i requires absolute path names!\n";
+    }
+    else {
+      if (! -d $dir) {
+	die "include dir $dir is not a directory or doesn't exist!\n";
+      }
+    }
+  }
+
+  backup($dst);
+  exit 0;
+}

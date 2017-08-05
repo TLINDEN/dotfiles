@@ -1,0 +1,1179 @@
+# -*-shell-script-*-
+#
+# Portable bash config
+
+rcversion=20160919.02
+
+# do not use the config if not in a terminal
+if test -z "$PS1"; then
+    return
+fi
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+	. /etc/bashrc
+fi
+
+# determine where we are
+os="${OSTYPE//[0-9\.\-]/}"
+
+# cygwin deserves it
+if test "$os" = "cygwin"; then
+    PATH=/bin:/usr/bin:$PATH:/usr/local/kde4/bin:/usr/X11R6/bin
+fi
+
+# determine emergence point
+if test -n "$SSH_CONNECTION"; then
+    if which host > /dev/null 2>&1; then
+	host=`echo $SSH_CONNECTION | awk ' { print $3 }' | xargs host -W 1 2>/dev/null | grep -v "^;;" | awk ' { print $5 } ' | awk -F. '{ print $1 }'`
+    fi
+fi
+if test "$host" = "3(NXDOMAIN)" -o  "$host" = "localhost" -o -z "$host"; then
+    if ! test "$os" = "cygwin"; then
+	host=`hostname | tr '[A-Z]' '[a-z]'`
+    else
+	host="${HOSTNAME,,}"
+    fi
+fi
+
+# specifics per target
+system="" # devel, dmz, ts, izlx (izb linuxgnu), home, root, jail
+dmz=""
+havedircolors=""
+havegnuls=""
+dircolorscfg="$HOME/.dir_colors"
+inputrc="$HOME/.inputrc"
+
+# create helper configs, if requested. that way I don't have to copy
+# around multiple files if I enter a new system
+createcfgs() {
+    if ! test -f $inputrc; then
+	if ! test -w $HOME; then
+	    inputrc="/tmp/.inputrc_tom"
+	fi
+	cat << EOF > $inputrc
+# toms readline config
+set show-all-if-ambiguous on
+set meta-flag on
+set input-meta on
+set convert-meta on
+set output-meta on
+
+# C-a blocked by screen, so use these also
+Meta-a: beginning-of-line
+
+# alt-left
+"\e[1;3C": forward-word
+# ctrl-right
+"\e[1;5C": forward-word
+# alt-left, vnc
+"\e\e[C": forward-word
+
+# alt-right
+"\e[1;3D": backward-word
+# ctrl-left
+"\e[1;5D": backward-word
+# alt-left, vnc
+"\e\e[D": backward-word
+
+# alt-down
+"\e[1;3B": beginning-of-line
+# alt-down, vnc
+"\e\e[A": beginning-of-line
+
+# alt-up
+"\e[1;3A": end-of-line
+# alt-up, vnc
+"\e\e[B": end-of-line
+
+EOF
+    fi
+
+    if test -n "$havedircolors"; then
+        # dircolors installed
+	if ! test -f "$dircolorscfg"; then
+	    if ! test -w "$HOME"; then
+		dircolorscfg="/tmp/.dir_colors_tom"
+	    fi
+	    cat <<EOF > $dircolorscfg
+COLOR tty
+OPTIONS -F -T 0
+TERM linux
+TERM screen
+TERM console
+TERM con132x25
+TERM con132x30
+TERM con132x43
+TERM con132x60
+TERM con80x25
+TERM con80x28
+TERM con80x30
+TERM con80x43
+TERM con80x50
+TERM con80x60
+TERM cons25
+TERM xterm
+TERM rxvt
+TERM xterm-color
+TERM color-xterm
+TERM vt100
+TERM dtterm
+TERM color_xterm
+EIGHTBIT 1
+NORMAL 00       
+FILE 00         
+DIR 01;44;37       
+LINK 00;32      
+FIFO 40;33      
+SOCK 01;35      
+BLK 40;33;01    
+CHR 40;33;01    
+ORPHAN 01;05;37;41  
+MISSING 01;05;37;41 
+EXEC 01;00 
+EOF
+	fi
+    fi
+}
+
+cfgupdate() {
+    # re-create dircolors and inputrc
+    rm -f $dircolorscfg
+    rm -f $inputrc
+    createcfgs
+    bind -f $inputrc
+    if test -n "$havegnuls"; then
+	if test -n "$havedircolors"; then
+	    eval `dircolors -b $dircolorscfg`
+	    alias ls="$havegnuls --color=tty"
+	fi
+    fi
+}
+
+
+setlang() {
+    # stay with en, but support umlauts and the other bastards
+    export LC_COLLATE="en_US.UTF-8"
+    export LC_CTYPE="en_US.UTF-8"
+    export LC_MONETARY="en_US.UTF-8"
+    export LC_NUMERIC="en_US.UTF-8"
+    export LC_TIME="en_US.UTF-8"
+    export LC_PAPER="en_US.UTF-8"
+    export LANG="en_US.UTF-8"
+    export LC_LANG="en_US.UTF-8"
+    export LANGUAGE="en_US.UTF-8"
+    export GDM_LANG="en_US.UTF-8"
+}
+
+# set $system variable based on emergence point
+case $host in
+    *devel?)
+	system=devel
+	host="${host/fits-/}"
+	case $host in
+	    b*) dmz=ibd;;
+	    m*) dmz=smd;;
+	    s*) dmz=isd;;
+	    p*) dmz=ipd;;
+	esac
+	;;
+    r4|honk|vulpecula)
+	system=root
+	;;
+    io)
+	system=home
+	;;
+    ???-srv[0-9][0-9][0-9][0-9])
+	system=dmz
+	dmz="${host%-*}"
+	;;
+    isptsfits*)
+	system=ts
+	host="${host/isptsfits/ts}"
+	;;
+    ftn*)
+	system=adz
+	;;
+    lannm*)
+	system=net
+	;;
+    *)
+	if ps axuw|grep $$|awk '{print $8}'|grep J > /dev/null 2>&1; then
+	    system=jail
+	elif test "$os" = "linuxgnu"; then
+	    system=izlx
+	elif test "$os" = "cygwin"; then
+	    system=win
+	else
+	    system=foreign # unknown? huh!
+	fi
+	;;
+esac
+
+# check if ls colors are supported
+if type dircolors > /dev/null 2>&1; then
+    havedircolors="yes"
+fi
+if test "$os" = "linuxgnu" -o "$os" = "cygwin"; then
+    havegnuls="ls"
+elif type gnuls > /dev/null 2>&1; then
+    havegnuls="gnuls"
+fi
+
+# generate customized support configs
+createcfgs
+INPUTRC="$inputrc"
+
+# configure ls color
+if test -n "$havegnuls"; then
+    if test -n "$havedircolors"; then
+	eval `dircolors -b $dircolorscfg`
+	alias ls="$havegnuls --color=tty"
+    fi
+fi
+
+# system dependend aliases and functions
+case $system in
+    dmz)
+         # check for reconfigure and notify me of some stuff
+	reconf=/nfs/reconfigure
+	if test -d "$reconf/bin"; then
+            # ok, it seems to mounted
+            source $reconf/etc/reconfigure.conf
+            source $reconf/etc/functions
+
+            # first, generate some wrapper functions for each service
+            services=`get_services`
+            lambda="/tmp/.root.tlin.lambda"
+            for service in $services; do
+		cat <<EOF >> $lambda
+$service () {
+        cd /nfs/$service
+        ./service.sh \$@
+        cd -
+}
+EOF
+	    done
+	    echo "alias services=\"echo $services\"" >> $lambda
+	    source $lambda
+	    rm -rf $lambda
+	fi
+	alias reconf="/nfs/reconfigure/bin/reconfigure.sh"
+	HISTFILE=/root/.bash_history_tlin@wgs
+	# show services list on login
+	jls
+	;;
+    ts)
+	setlang
+	http_proxy=http://172.20.143.12:3128/
+	export SSH_AUTH_SOCK=$HOME/tmp/cache/agent
+	alias emacs='emacs -fn 6x13'
+	alias recompile="DISPLAY='' xmonad --recompile"
+	alias samhainreload="auto.sh ssh %h \"/usr/local/etc/rc.d/samhain.sh status | cut -f6 -d' ' | sed 's/\.//' | xargs kill -TTOU\""
+	nagiosupdate () {
+		scp napizb21:/var/nagios/napisp21/status.dat /tmp/nagios.dat
+	}
+	nagios () {
+		echo -n "Nagios status of "
+		ls -l /tmp/nagios.dat | awk '{print $6, $7, $8}'
+		parse-status-log.pl /tmp/nagios.dat $1
+	}
+	;;
+    root)
+	setlang
+	;;
+    net)
+	if test "$os" = "solaris"; then
+	    alias ps="/usr/ucb/ps"
+	fi
+	;;
+    jail)
+	case $host in
+	    hlb-badm*)
+		setlang
+		HISTFILE=$HOME/.bash_history_iz00468
+		INPUTRC=$HOME/.inputrc_iz00468
+		history -r
+		bind -f $INPUTRC
+		;;
+	esac
+	;;
+    home)
+	setlang
+	alias recompile="DISPLAY='' xmonad --recompile"
+	alias xev="xev | grep -A2 --line-buffered '^KeyRelease' | sed -n '/keycode /s/^.*keycode \([0-9]*\).* (.*, \(.*\)).*$/\1 \2/p'"
+	alias mp='mpeg_play -dither color'
+	alias dnstunnel=dns2tcpc
+	alias essen="ssh tim@tim essen"
+	alias emacs='emacs -fn 8x16'
+	touch /tmp/.alias
+	sudo -l | grep NOPASSWD | awk '{print $3}' | while read cmd; do
+	    al=`echo $cmd | sed 's/.*\///'`
+	    echo "alias $al=\"sudo $cmd\"" >> /tmp/.alias
+	done
+	source /tmp/.alias
+	rm -f /tmp/.alias
+	alias vpn="sudo /root/bin/vpngate-find.pl"
+	;;
+    adz)
+	setlang
+	http_proxy=http://127.0.0.1:3128/
+	alias emacs='/cygdrive/c/daten/portable/emacs-20.7/bin/runemacs.exe -geometry 90x66'
+	;;
+    win)
+	setlang
+	;;
+    devel)
+	# check for apparix, and enable functions
+	if which apparix > /dev/null 2>&1; then
+            function to () {
+		if test "$2"; then
+		    cd "$(apparix "$1" "$2" || echo .)";
+		else
+		    cd "$(apparix "$1" || echo .)";
+		fi
+		pwd
+            }
+            function bm () {
+		if test "$2"; then
+		    apparix --add-mark "$1" "$2";
+		elif test "$1"; then
+		    apparix --add-mark "$1";
+		else
+		    apparix --add-mark;
+		fi
+            }
+            function portal () {
+		if test "$1"; then
+		    apparix --add-portal "$1";
+		else
+		    apparix --add-portal;
+		fi
+            }
+            # function to generate list of completions from .apparixrc
+            function _apparix_aliases () {
+		cur=$2
+		dir=$3
+		COMPREPLY=()
+		if [ "$1" == "$3" ]
+		then
+                    COMPREPLY=( $( cat $HOME/.apparix{rc,expand} | \
+                        grep "j,.*$cur.*," | cut -f2 -d, ) )
+		else
+                    dir=`apparix -favour rOl $dir 2>/dev/null` || return 0
+                    eval_compreply="COMPREPLY=( $(
+                    cd "$dir"
+                    \ls -d *$cur* | while read r
+                    do  
+                        [[ -d "$r" ]] &&
+                        [[ $r == *$cur* ]] &&
+                            echo \"${r// /\\ }\"
+                    done
+                    ) )"
+                    eval $eval_compreply
+		fi
+		return 0
+            }
+            # command to register the above to expand when the 'to' command's args are
+            # being expanded
+            complete -F _apparix_aliases to
+	fi # if apparix
+	FETCH_BIND_ADDRESS=`host "fits-$host" | grep "has address" | awk ' { print $5 } ' | awk -F. '{ print $1 }'`
+	export FETCH_BIND_ADDRESS
+
+	HISTFILE=/root/.bash_history_iz00468
+	;;
+    izlx)
+        alias s=sudo
+        ;;
+esac
+
+# proxy required?
+case $dmz in
+    ibd)
+	http_proxy=http://172.17.148.57:3128
+	;;
+    isd|smd)
+	http_proxy=http://172.20.143.12:3128
+	;;
+    ipd)
+	http_proxy=http://172.17.243.13:3128
+	;;
+esac
+if test -n "$http_proxy"; then
+    ftp_proxy=$http_proxy
+    ALL_PROXY=$http_proxy
+    export http_proxy ftp_proxy ALL_PROXY
+fi
+
+
+# global aliases
+alias rmtilde="find . -name '*~' -exec rm '{}' \; -ls"
+alias ds='ls -1 | while read dir; do echo "`du -ch \"$dir\"` ...... `pwd`/$dir" | grep total;done'
+alias dir='ls -l'
+alias ll='ls -l'
+alias la='ls -la'
+alias l='ls -alF'
+alias ls-l='ls -l'
+alias lt='ls -ltr'
+alias o='less'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+alias .....='cd ../../../..'
+alias rd=rmdir
+alias md='mkdir -p'
+alias unix2dos='recode lat1..ibmpc'
+alias dos2unix='recode ibmpc..lat1'
+alias which='type -p'
+alias .='pwd'
+alias tenlet='telnet'
+alias tlenet='telnet'
+alias less='less -i -P "?f%f:Standard input. %lb / %L ?e(END):>"'
+alias les='less'
+alias grip='egrep -i'
+alias utf2latin="perl -Mutf8 -e 'while (<>) {  utf8::decode(\$_); print; }'"
+alias latin2utf="perl -Mutf8 -e 'while (<>) {  utf8::encode(\$_); print; }'"
+alias httpdirlisting="python -m SimpleHTTPServer"
+alias base64encode="perl -MMIME::Base64 -n -e 'print encode_base64(\$_)'"
+alias base64decode="perl -MMIME::Base64 -n -e 'print decode_base64(\$_)'"
+
+if ! type tac > /dev/null 2>&1; then
+    # no tac installed, simulate a simple version
+    tac() {
+	sed '1!G;h;$!d' $*
+    }
+fi
+
+if ! type jot > /dev/null 2>&1; then
+    # no jot installed, simulate a simple version
+    jot() {
+	r=$1
+	if test -z "$r"; then
+	    echo "jot <rounds>"
+	else
+	    perl -e "foreach(0..$r){print \"\$_\n\";}"
+	fi
+    }
+fi
+
+if type mplayer > /dev/null 2>&1; then
+    m() {
+        file="$1"
+
+        mplayer "$@"
+        
+        if test -f "$file"; then
+            # only register single files
+            touch ".${file}.last-read"
+        fi
+    }
+fi
+
+
+if type fetch > /dev/null 2>&1; then
+    if fetch --help 2>&1 |grep verify > /dev/null 2>&1; then
+        alias get="fetch -n --no-verify-peer --no-verify-hostname"
+    else
+        alias get="fetch -n"
+    fi
+elif type curl > /dev/null 2>&1; then
+    get() {
+        uri=$1
+        file=`echo $uri | sed 's/.*\///'`
+        curl --insecure -o $file $uri
+    }
+elif type wget > /dev/null 2>&1; then
+    alias get='wget --no-check-certificate'
+else
+    :
+fi
+
+if type emacs > /dev/null 2>&1; then
+    # emacs installed, add console alias, in case of no x11
+    # do not forget to set this in .emacs, so that backspace works:
+    # (define-key key-translation-map [?\C-h] [?\C-?])
+    alias emacsterminal="env TERM=xterm-256color emacs -nw -fg black -bg brightwhite"
+    alias et=emacsterminal
+fi
+
+# convert mac addresses back and forth
+mac2bsd() {
+  mac=$1
+  if test -z "$mac"; then
+    echo "usage: mac2bsd <cisco mac address>"
+  else
+    perl -e '$mac = shift; $mac =~ s/[\.:]//g; print join ":", ($mac =~ m/../g); print "\n"' $mac
+  fi
+}
+
+mac2cisco() {
+  mac=$1
+  if test -z "$mac"; then
+    echo "usage: mac2cisco <cisco mac address>"
+  else
+    perl -e '$mac = shift; $mac =~ s/[\.:]//g; print join ".", ($mac =~ m/..../g); print "\n"' $mac
+  fi
+}
+
+mac2mrtg() {
+  mac=$1
+  if test -z "$mac"; then
+    echo "usage: mac2mrtg <cisco mac address>"
+  else
+    perl -e '$mac = shift; $mac =~ s/[\.:]//g; print join "-", ($mac =~ m/../g); print "\n"' $mac
+  fi
+}
+
+# re-attach to old screen session
+sc() {
+    id=$1
+
+    if test -n "$id"; then
+        screen -d -r $id
+    else
+        if screen -d -r > /dev/null 2>&1; then
+            # works
+            :
+        else
+            # nope, find out the one
+            tmp="/tmp/.screenlist.$$"
+            screen -d -r > $tmp
+            Ndetached=`grep Detached $tmp | wc -l | sed 's/ //g'`
+            if test "x$Ndetached" = "x1"; then
+                # only one, use this
+                detached=`grep Detached $tmp | awk '{print $1}'`
+                rm -f $tmp
+                screen -d -r $detached
+            else
+                echo "More than one screen sessions available:"
+                cat $tmp
+                rm -f $tmp
+            fi
+        fi
+    fi
+}
+
+if test "$TERM" = "screen"; then
+    unset sc
+    alias sc="echo not supported inside screen session"
+fi
+
+execute () {
+    echo "$*"
+    $*
+}
+
+# dig as infos
+as () {
+    what=$1
+    as=$2
+    api="https://stat.ripe.net/data"
+    wget="wget --no-check-certificate -q -O-"
+
+    if test -z "$as"; then
+        echo "Usage: aswhat <AS>"
+        case $what in
+            routes)
+                echo "Lists all routes announced by given AS"
+                ;;
+            neighbors)
+                echo "List all neighbors of the given AS"
+                ;;
+            name)
+                echo "Show the name of the given AS"
+                ;;
+        esac
+    else
+        if echo "$as" | egrep "^[0-9]" > /dev/null 2>&1 ; then
+            as="as$as"
+        fi
+
+        case $what in
+            routes)
+                https_proxy=$https_proxy $wget "$api/announced-prefixes/data.yaml?resource=$as" | \
+                    grep prefix: | awk '{print $3}' | sort -n
+                ;;
+            neighbors)
+                tmp=/tmp/asn$$
+                https_proxy=$https_proxy $wget "$api/asn-neighbours/data.yaml?resource=$as" > $tmp
+                echo "Upstreams:"
+                egrep "asn.*left" $tmp | awk '{print $3}' | sed 's/,//' | sort -n | while read asn; do
+                    name=`asname $asn`
+                    printf "  %5s  " $asn
+                    echo $name
+                done
+                echo "Downstreams:"
+                egrep "asn.*right" $tmp | awk '{print $3}' | sed 's/,//' | sort -n | while read asn; do
+                    name=`asname $asn`
+                    printf "  %5s  " $asn
+                    echo $name
+                done
+                ;;
+            name)
+                https_proxy=$https_proxy $wget "$api/as-overview/data.yaml?resource=$as" | \
+                    grep holder: | sed 's/^.*holder: //'
+        esac
+    fi
+}
+
+asroutes () {
+    as routes $*
+}
+
+asneighbors () {
+    as neighbors $*
+}
+
+asname () {
+    as name $*
+}
+
+# set screen title based on where we ssh'd to
+if test "$system" != "jail"; then
+  rssh=`which ssh`
+  ssh () {
+    screenbin=`which screen`
+    if test "$system" != "jail" -a -n "$screenbin" -a "$TERM" == "screen"; then
+        args="$*";
+        hostname=`echo "$args" | sed -e 's/-l [a-zA-Z0-9]*//g' -e 's/ //g' -e 's/\..*//'`;
+        screen -X title $hostname;
+        $rssh $args;
+        screen -X title `hostname`;
+    else
+        $rssh $*;
+    fi
+  }
+fi
+
+# mirror a webserver
+mirror () {
+  uri=$1
+  dir=$2
+  if test -z "$uri" -o -z "$dir"; then
+      echo "Usage: mirror <domain> <target-directory>"
+  else
+      cd $dir
+      wget -r -m -nH -E -k -p -o ~/.wgetlog http://$uri/
+  fi
+}
+
+# pack archives of any type
+extr () {
+    act() {
+        echo "$@"
+        "$@"
+    }
+    n2dir() {
+        tarball="$1"
+        suffix="$2"
+        dir=`echo "$tarball" | perl -pne "s/.$suffix//i"`
+        dir=`basename "$dir"`
+        echo "$dir"
+    }
+    tarball="$1"
+    if test -n "$tarball"; then
+        if test -e "$tarball"; then
+            if echo "$tarball" | grep -Ei '(.tar|.jar|.tgz|.tar.gz|.tar.Z|.tar.bz2|tbz)$' > /dev/null 2>&1; then
+                # tarball
+                if echo "$tarball" | grep -E '.(tar|jar)$' > /dev/null 2>&1; then
+                    # plain old tarball
+                    extr=""
+                elif echo "$tarball" | grep -E '(bz2|tbz)$' > /dev/null 2>&1; then
+                    extr="j"
+                elif echo "$tarball" | grep -E 'Z$' > /dev/null 2>&1; then
+                    extr="Z"
+                else
+                    extr="z"
+                fi
+
+                if ! tar ${extr}tf "$tarball" | cut -d/ -f1 | sort -u | wc -l | egrep ' 1$' > /dev/null 2>&1; then
+                    # does not extract into own directory
+                    dir=`n2dir "$tarball" "(tar.gz|tgz|tar.bz2|tbz|tar|jar|tar.z)"`
+                    mkdir -p $dir
+                    extr="-C $dir -${extr}"
+                fi
+                act tar ${extr}vxf $tarball
+            elif echo $tarball | grep -Ei '.zip$' > /dev/null 2>&1; then
+                # zip file
+                if unzip -l "$tarball" | grep [0-9] | awk '{print $4}' | cut -d/ -f1 | sort -u | wc -l | egrep ' 1$' /dev/null 2>&1; then
+                    # does not extract into own directory
+                    dir=`n2dir "$tarball" zip`
+                    act mkdir -p $dir
+                    opt="-d $dir"
+                fi
+                act unzip ${opt} $tarball
+            elif echo "$tarball" | grep -Ei '.rar$' > /dev/null 2>&1; then
+                if ! unrar vt "$tarball" | tail -5 | grep '.D...' > /dev/null 2>&1; then
+                    # does not extract into own directory
+                    dir=`n2dir "$tarball" rar`
+                    act mkdir -p "$dir"
+                    (cd "$dir"; act unrar x -e $tarball)
+                else
+                    act unrar x $tarball
+                fi
+            elif echo "$tarball" | grep -Ei '.gz$' > /dev/null 2>&1; then
+                # pure gzip file
+                act gunzip "$tarball"
+            else
+                :
+            fi
+        else
+            echo "$tarball does not exist!"
+        fi
+    else
+        echo "Usage: untar <tarball>"
+    fi
+}
+
+# same as awk but supports perl code within
+pwk () {
+    if test -z "$*"; then
+        echo "Perl awk. Usage:"
+        echo "Perlish: pwk [-F/regex/] [-Mmodule] <perl code>"
+	echo " Simple: pwk <1,2,n | 1..n>"
+        echo "Perlish helpers:"
+        echo "  p() - print field[s], eg: p(\$1,\$4,\$7)"
+        echo "  d() - dump variables, without param, dump all"
+        echo "  e() - exec code on all fields, eg: e('s/foo/bar/')" 
+        echo
+        echo "Default loaded modules: Data::Dumper, IO::All"
+        echo "Enable \$PWKDEBUG for debugging"
+	echo "Simple mode has no helpers or anything else"
+    else
+	# determine pwk mode
+	if echo "$*" | egrep '^[0-9,\.]*$' > /dev/null 2>&1; then
+	    # simple mode
+	    code=`echo "$*" | perl -pe 's/([0-9]+?)/\$x=\$1-1;\$x/ge'`	    
+	    perl -lane "print join(' ', @F[$code]);"
+	else
+	    # perl mode
+            # prepare some handy subs
+            uselib="use lib qw(.);"
+            subprint="sub p{print \"@_\";};"
+            subsed='sub e{$r=shift; foreach (@F) { eval $r; }};'
+            subdump='sub d {$x=shift||{_=>$_,S=>\@F}; print Dumper($x);};'
+            begin=";  BEGIN { $uselib $stdsplit $subprint $subdump $subsed}; "
+	    
+            # extract the code and eventual perl parameters, if any
+            code=""
+            args=""
+            last=""
+            for arg in "$@"; do
+		args="$args $last"
+		last="$arg"
+            done
+            code=$last
+	    
+            # fix perl -F /reg/ bug, complains about file /reg/ not found,
+            # so remove the space after -F
+            args=`echo "$args" | sed -e 's/-F /-F/' -e 's/-M /-M/'`
+	    
+            # convert $1..n to $F[0..n]
+            code=`echo "$code" | perl -pe 's/\\\$([0-9]+?)/\$x=\$1-1;"\\\$F[\$x]"/ge'`
+	    
+            # rumble
+            defaultmodules="-MData::Dumper"
+            if perl -MIO::All -e0 > /dev/null 2>&1; then
+		defaultmodules="$defaultmodules -MIO::All"
+            fi
+	    
+            if test -n "$PWKDEBUG"; then
+		set -x
+            fi
+            perl $defaultmodules $args -lane "$code$begin"
+            if test -n "$PWKDEBUG"; then
+		set +x
+            fi
+	fi
+    fi
+}
+
+# list files from today
+lh () {
+    opt="$1"
+    arg="$2"
+    num=""
+    if test -n "$opt" -a -n "$arg"; then
+	# -l 4
+	num=$arg
+    else
+	# no $arg
+	if echo "$opt" | grep "[0-9]" > /dev/null 2>&1; then
+	    # 4
+	    num=$opt
+	    opt=""
+	elif test "$opt" = "-h"; then
+	    echo "display files changed today or <n> days ago."
+	    echo "usage: lh [-options] [n]"
+	    echo "options: ls options, see ls(1)"
+   	    echo "      n: number of past days."
+	else
+	    # -l
+	    num=0
+	fi
+    fi
+    files=`find . -maxdepth 1 -type f -ctime $num | sed 's#./##' | sort`
+    if test -n "$files"; then
+	# use 'ls' only on matches, otherwise the whole directory would be printed
+	echo "$files" | xargs ls $opt
+    fi
+}
+
+# dns wrapper, uses dig if available, host otherwise
+h () {
+    if type dig > /dev/null 2>&1; then
+	args="$*"
+	opt="+nocmd +noall +answer"
+	rev=""
+	if echo "$args" | egrep '^[0-9\.:]*$' > /dev/null 2>&1; then
+	    # ip address
+	    cmd="dig -x $* +short"
+	else
+	    # hostname
+	    cmd="dig +nocmd +noall +answer $*"
+	fi
+	echo "; $cmd"
+	$cmd
+    else
+	# no dig installed, use host instead
+	host="$1"
+	type="a"
+	debug=""
+	cmd="host $debug"
+	if test -z "$host"; then
+            echo "Usage: h <host> [<querytype>]"
+            return
+	else
+            if test -n "$2"; then
+		type=$2
+            fi
+            if test -n "$debug"; then
+		set -x
+            fi
+            case $type in
+		ls)
+                    $cmd -l $host
+                    ;;
+		any)
+                    cmd=`echo $cmd | sed 's/\-d//'`
+                    $cmd -d -t any $host | grep -v ^\; | grep -v "^rcode ="
+                    ;;
+		mx|a|ns|soa|cname|ptr)
+                    $cmd -t $type $host
+                    ;;
+		*)
+                    echo "*** unsupported query type: $type!"
+                    echo "*** allowed: mx, a, ns, any, *, soa, cname, ptr"
+                    continue
+                    ;;
+            esac
+            if test -n "$debug"; then
+		set +x
+            fi
+	fi
+    fi
+}
+
+# display an uninstalled manpage
+lman () {
+    nroff -Tascii -man $1 | less
+}
+
+# make a directory diff, stolen from olli
+dirdiff () {
+    if test -n "$1" -a -n "$2"; then
+	diff -rc "$1" "$2" \
+	| awk '
+	{
+	    if (/^Only in / || /^diff /)
+		printf "\n\n\n\n\n\n";
+	    else if (/^@@ /)
+		printf "\n";
+	    print;
+	}'
+    else
+	echo "Usage: dirdiff <from-dir> <to-dir>"
+    fi
+}
+
+# show pid(s) of named process
+pidof () {
+    process="$1"
+    if test -n "$process"; then
+	case "$OSTYPE" in
+	    SunOS)  PS=/usr/ucb/ps ;;
+		*)  PS=ps ;;
+	esac
+	$PS axuww | egrep " ${process}( |\$)" | grep -v grep | awk '{print $2}'
+    else
+	echo "Usage: pidof <named proccess>"
+    fi
+}
+
+# generic sudo wrapper
+autosudo () {
+    # enable auto sudo
+    case $1 in
+	e|ena|enable)
+	    export AUTOSUDO=1
+	    export SUDOCMD=`type -p sudo`
+	    alias sudo=sudoexec
+	    ;;
+	d|dis|disable)
+	    unset AUTOSUDO
+	    unalias sudo
+	    echo "+++ disabling auto sudo commands +++"
+	    for cmd in $AUTOSUDOCMDS; do
+		echo "    disabling $cmd"
+		unset $cmd
+	    done
+	    ;;
+	s|sh|show|status)
+	    if test -n "$AUTOSUDO"; then
+		echo "+++ auto sudo enabled for: $AUTOSUDOCMDS +++"
+	    else
+		echo "+++ auto sudo disabled +++"
+	    fi
+	    ;;
+	a|add)
+	    shift
+	    autosudo ena
+	    addsudo $*
+	    ;;
+	*)
+	    echo "Usage: autosudo <enable|disable|show> | <add> <cmd, ...>"
+	    ;;
+	esac
+}
+
+sudoexec () {
+    # determine sudo cmd and if successfull, alias it away
+    if test -n "$AUTOSUDO"; then
+	if $SUDOCMD $*; then
+	    cmd=`echo "$*" | awk '{ print $1}'`
+	    if echo "$cmd" | egrep -v "^-" > /dev/null 2>&1; then
+		cmd=`basename $cmd`
+		addsudo $cmd
+
+	    fi
+	fi
+    fi
+}
+
+addsudo() {
+    lambda="/tmp/.lambda.bash.$$"
+    touch $lambda
+    for cmd in $*; do
+	for have in $AUTOSUDOCMDS; do
+	    if test "x$cmd" = "x$have"; then
+		return # already added
+	    fi
+	done
+	if alias $cmd > /dev/null 2>&1; then
+	    echo "unalias $cmd" >> $lambda
+	fi
+	echo "alias $cmd=\"$SUDOCMD $cmd\"" >> $lambda
+	export LAMBDA=$lambda
+	AUTOSUDOCMDS="$AUTOSUDOCMDS $cmd"
+	echo
+	echo "+++ autosudo: added \"$cmd\" to auto sudo commands +++"
+    done
+}
+
+cleanlambda() {
+    if test -n "$LAMBDA"; then
+	rm -f $LAMBDA
+	LAMBDA=""
+	unset LAMBDA
+    fi
+}
+
+CUTSELBASE="http://www.daemon.de/cutsel"
+CUTSELID="HN3D"
+
+copy () {
+    curl --insecure -s "${CUTSELBASE}/index.cgi?id=${CUTSELID}&action=copy" |
+	perl -e '$in = join "", <>; $in =~ s/.*<textarea[^>]*>(.*)<\/textarea>.*/$1/s; print $in'
+}
+
+paste () {
+    err=`curl -s --http1.0 --insecure \
+	 --form id=${CUTSELID} --form action=paste --form "sel=<-" "${CUTSELBASE}/index.cgi" | grep 'color: red'`
+
+    if echo "$err" | grep "><" > /dev/null 2>&1; then
+	echo ok
+    else
+	echo "$err" | sed -e 's/<span style="color: red">//' -e 's#</span>##'
+    fi
+}
+
+copyfile () {
+    lastfile=`curl --insecure -s "${CUTSELBASE}/index.cgi?id=${CUTSELID}&action=copy" |
+	egrep "Files:.*href" | sed -e 's/.*href="files/files/' -e 's/".*//'`
+    if test -n "$lastfile"; then
+	get "${CUTSELBASE}/$lastfile"
+    else
+	echo "no file"
+    fi
+}
+
+pastefile () {
+    file="$1"
+    if test -z "$file"; then
+	echo "file parameter missing"
+    else
+	err=`curl -s --http1.0 --insecure \
+	 --form id=${CUTSELID} --form action=paste --form "upload=<$file;filename=$file" \
+         "${CUTSELBASE}/index.cgi" | grep 'color: red'`
+	
+	if echo "$err" | grep "><" > /dev/null 2>&1; then
+	    echo ok
+	else
+	    echo "$err" | sed -e 's/<span style="color: red">//' -e 's#</span>##'
+	fi
+    fi
+}
+
+
+##############################################
+#  prompt
+##############################################
+#BLUE="\033[0;34m"
+BLUE="\033[0;0m"
+GREEN="\033[0;32m"
+RED="\033[0;31m"
+DARKRED="\033[1;31m"
+MAGENTA="\033[0;35m"
+#BLUEUNDER="\033[4;34m"
+BLUEUNDER="\033[4;37m"
+BLACK="\033[0m"
+BOLD="\033[1;30m"
+
+
+DATE () {
+    echo -e "[`date +%d.%b" "%H:%M:%S`]"
+}
+
+JOBS () {
+    NUM=`jobs|wc -l| awk '{print $1}'`
+    case $NUM in
+    	"0")
+	    ;;
+	*)
+	    echo -e " [&$NUM]"
+	    ;;
+    esac
+}
+
+JAIL() {
+    if test "$system" = "jail"; then
+	echo "[JAIL $host] "
+    else
+	echo ""
+    fi
+}
+
+SHAUTOSUDO () {
+    # only used in $system=izlx (sudo aware linux systems)
+    if test -n "$AUTOSUDO"; then
+	count=$(wc -w <<< "$AUTOSUDOCMDS" | sed 's/ //g')
+	if test $count -eq 0; then
+	    echo "[autosudo] "
+	else
+	    echo "[autosudo+$count] "
+	fi
+    fi
+}
+
+empty () {
+    #
+    # clean functions for subshell
+    unset -f DATE JOBS LOAD USERS jail
+}
+
+case $UID in
+    "0")
+        CURSOR="#"
+        ;;
+    *)
+        CURSOR="%"
+esac
+
+# fix for cygwin
+case $TERM in
+    rxvt-cygwin-native)
+        export TERM=rxvt
+        ;;
+esac
+
+
+# finally, the prompt
+case $system in
+    adz)
+PROMPT_COMMAND="PS1='\[\033]0;\u@$host:\w\007\]
+\$(DATE) --- [\w] ---
+\u@$host: $CURSOR '"
+;;
+    izlx|home)
+	# source autosudo functions, if configured, see autosudo below
+PROMPT_COMMAND="if test -n \"\$LAMBDA\"; then source \$LAMBDA; cleanlambda; fi; PS1='\[\033]0;\u@$host:\w\007\]
+\$(DATE) --- [\w]\$(SHAUTOSUDO)\$(JOBS) ---
+\u@$host: $CURSOR '"
+	;;
+    *)
+PROMPT_COMMAND="PS1='\[\033]0;\u@$host:\w\007\]
+\$(DATE) --- [\w]\$(JAIL)\$(JOBS) ---
+\u@$host: $CURSOR '"
+esac
+
+# customize path
+for dir in $HOME/bin $HOME/.cabal/bin $HOME/perl5/perlbrew/bin /usr/local/bin /usr/local/sbin /usr/sbin; do
+    if test -d $dir; then
+	PATH=$PATH:$dir
+    fi
+done
+export PATH
+
+# global env vars
+EDITOR=vi
+LESSCHARSET=iso8859
+GREP_OPTIONS="--binary-files=without-match --directories=skip"
+
+# history options
+HISTFILESIZE=1000000
+HISTSIZE=1000000
+HISTCONTROL=ignoreboth
+HISTIGNORE='ls:bg:fg:history'
+HISTTIMEFORMAT='%F %T '
+
+export EDITOR PROMPT_COMMAND PATH LESSCHARSET GREP_OPTIONS HISTFILE HISTFILESIZE HISTSIZE HISTCONTROL HISTIGNORE HISTTIMEFORMAT INPUTRC
+
+# better override
+umask 022
+
+# completion?
+bash=${BASH_VERSION%.*}; bmajor=${bash%.*}; bminor=${bash#*.}
+if [ "$PS1" ] && [ $bmajor -eq 2 ] && [ $bminor '>' 04 ] \
+   && [ -f ~/.completion ]; then # interactive shell
+        # Source completion code
+        source ~/.completion
+fi
+
+# bash options
+shopt -s cdable_vars checkhash checkwinsize histappend cmdhist
+
+# perl brew installed?
+if test -d ~/perl5; then
+    source ~/perl5/perlbrew/etc/bashrc
+fi
+
+# python?
+if test -e ~/.pythonrc; then
+    export PYTHONSTARTUP=~/.pythonrc
+fi
+
+# any local specific config?
+if test -e ~/.bashrc-local; then
+    source  ~/.bashrc-local
+fi

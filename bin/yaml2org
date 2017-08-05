@@ -1,0 +1,31 @@
+#!/usr/bin/perl
+use YAML qw(LoadFile);
+use Data::Dumper;
+my $yaml = LoadFile(shift);
+my %heading;
+
+foreach my $id (sort { $yaml->{$a}->{path} cmp $yaml->{$b}->{path} } keys %{$yaml}) {
+  my $item = $yaml->{$id};
+  my $path = $item->{path} || "unsorted";
+  my $body = $item->{body};
+  my $title = $item->{title};
+  my $date = $item->{date};
+
+  $path =~ s|/||g;
+
+  if (! exists $heading{$path}) {
+    $heading{$path} = $path;
+    print "* $path\n";
+  }
+
+  $body =~ s/^/  /gm;
+  $body =~ s/[\n\s]*$//gs;
+
+  $title =~ s/https?:\/\///;
+  $title =~ s/\/$//;
+
+  if ($date =~ /^(\d{2})\.(\d{2})\.(\d{4}) (.*)/) {
+    $date = "$3-$2-$1 $4";
+  }
+  printf "** %s\n  [%s]\n%s\n", $title, $date, $body;
+}

@@ -1,0 +1,3 @@
+#!/bin/sh
+exec gnome-terminal --hide-menubar
+#exec rxvt-unicode -bg NavyBlue -fg White +sb  -fn "xft:Bitstream Vera Sans Mono:pixelsize=16" -vb -sl 10000

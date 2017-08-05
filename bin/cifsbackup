@@ -1,0 +1,134 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use Digest::SHA qw(sha256_hex);
+use DBM::Deep;
+use File::Find;
+use File::Path qw(make_path remove_tree);
+use File::Spec::Functions qw(splitpath file_name_is_absolute catfile catpath);
+use File::Copy;
+use Data::Dumper;
+
+use strict;
+use warnings;
+no strict 'subs';
+
+our ($dst, @include, @exclude, %save, $version, %db, $o_h, $o_v);
+
+
+
+sub usage {
+  print STDERR q(
+usage: $0 [-hvsid]
+
+Options:
+ --include -i <dir>    directories to backup, may occur multiple times
+ --exclude -e <name>   directory or file to ignore
+ --dst -d <dir>        target directory where to save backups
+ --help -h -?          print help
+ --version -v          print version
+
+);
+  exit 1;
+}
+
+
+
+sub work {
+  my $file = $File::Find::name;
+  my $dir  = $File::Find::dir;
+
+  if (-f $file) {
+    if (! exists $db{$file}) {
+      mark($dir, $file);
+    }
+    else {
+      check($dir, $file);
+    }
+  }
+}
+
+
+sub mark {
+  my($dir, $file, $sha) = @_;
+  if (! $sha) {
+    $sha = sha256_hex($file);
+  }
+  $save{$file} = {dir => $dir, sha => $sha };
+}
+
+
+sub check {
+  my($dir, $file) = @_;
+  my $c = sha256_hex($file);
+  if ($db{$file} ne $c) {
+    mark($dir, $file, $c);
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+$version = 0.01;
+
+Getopt::Long::Configure( qw(no_ignore_case));
+if (! GetOptions (
+		  "include|i=s"  => \@include,
+		  "exclude|e=s"  => \@exclude,
+		  "dst|d=s"      => \$dst,
+		  "version|v"    => \$o_v,
+		  "help|h"       => \$o_h,
+		 )    ) {
+  usage;
+}
+
+if ($o_h) {
+  usage;
+}
+if ($o_v) {
+  print STDERR "$0 version $version\n";
+  exit;
+}
+
+
+if (!$dst && !@include) {
+  usage;
+}
+
+if (! -e $dst) {
+  make_path($dst);
+}
+
+tie %db, 'DBM::Deep', "$dst/checksums.dbmdeep";
+
+
+
+find({ wanted => \&work, follow => 0 }, @include);
+
+
+
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+
+my $ts = sprintf "%04d-%02d-%02d-%02d:%02d", $year+1900, $mon+1, $mday, $hour, $min;
+
+make_path(File::Spec->catdir( $dst, $ts ));
+
+open LOG, ">>$dst/cifsbackup.log";
+
+foreach my $file (keys %save) {
+  print LOG "$ts $save{$file}->{sha} $file\n";
+  my $target = File::Spec->catdir($dst, $ts, $save{$file}->{dir});
+  make_path($target);
+  copy($file, $target);
+  $db{$file} = $save{$file}->{sha};
+}
+
+close LOG;

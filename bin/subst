@@ -1,0 +1,213 @@
+#!/usr/bin/perl
+#
+# subst - replace strings in one or more files using
+#         perl regular expressions (~= s/// syntax).
+#         Files will be edited inline (perl -i).
+#
+# Copyright (c) 2002-2014 - Thomas von Dein <tom@linden.at>
+#
+
+use strict;
+use Getopt::Long;
+use Data::Dumper;
+use vars qw($VERSION $test $usage $version $me);
+my (@m, @r, @files, @M);
+
+$VERSION = "1.1.4";
+$me = $0;
+$me =~ s(^.*/)();
+
+Getopt::Long::Configure( qw(no_ignore_case));
+if (! GetOptions (
+                  "regex|r=s"      => \@r,
+                  "moveregex|m=s"  => \@m,
+                  "module|M=s"     => \@M,
+                  "test|t"         => \$test,
+                  "help|h"         => \$usage,
+                  "version|v"      => \$version
+                 ) ) {
+  $usage = 1;
+}
+
+if ($version) {
+  print STDERR "$me $VERSION\n";
+  exit;
+}
+
+if ($usage || (! @r && ! @m)) {
+  print qq~
+Usage: $me  [-M <perl module>] [-t] -r 's/old/new/<flags>' [ -r '...', ...] [<file> ...     | /regex/]
+       $me  [-M <perl module>] [-t] -m 's/old/new/<flags>' [ -m '...', ...] [<file|dir> ... | /regex/]
+
+Options:
+ -r        replace contents of file(s)
+ -m        rename file(s)
+ -M        load additional perl module to enhance /e functionality.
+ -t        test mode, do not overwrite file(s)
+
+Samples:
+ - replace "tom" with "mac" in all *.txt files:
+   subst -r 's/tom/mac/g' *.txt
+
+ - rename all jpg files containing whitespaces:
+   subst -m 's/ /_/g' '/\.jpg/'
+
+ - decode base64 encoded contents
+   subst -M MIME::Base64 -r 's/([a-zA-Z0-9]*)\$/decode_base64(\$1)/gem' somefile
+
+ - turn every uri into a link
+   subst -M "Regexp::Common qw /URI/" -r 's#(\$RE{URI}{HTTP})#<a href="\$a">link</a>#g' somefile
+
+If <file> is -, STDIN will be used as input file, results will be printed
+to STDOUT. -t does not apply for STDIN input.
+
+Substitution regex must be perlish. See 'perldoc perlre' for details.
+
+Version: $VERSION. Copyright (c) 2002-2014 - Thomas von Dein <tom\@linden.at>
+~;
+  exit;
+}
+
+# load modules, if any
+foreach my $module (@M) {
+  eval "use $module";
+  if ($@) {
+    die $@;
+  }
+}
+
+
+# check regex's
+local $_= "";
+foreach my $regex (@r, @m) {
+  eval $regex;
+  if ($@) {
+    print STDERR "ERROR: failed to compile regex \'$regex\':\n       $@\n";
+    exit;
+  }
+}
+
+# see if files arg is a regex
+if ($ARGV[0] =~ /^\/(.*)\/$/) {
+  my $freg = $1;
+  opendir LOC, ".";
+  while (my $file = readdir(LOC)) {
+    next if ($file eq '.' || $file eq '..');
+    if ($file =~ /$freg/) {
+      push @files, $file;
+    }
+  }
+  closedir LOC;
+}
+else {
+  @files = @ARGV;
+}
+
+
+if (@r) {
+  # actually, do the substitute
+  foreach my $file (@files) {
+    next if (-l $file);
+    next if (! -e $file);
+    my $tmpfile = &gettemp();
+     if ($file eq '-') {
+      *T = *STDIN;
+      *F = *STDOUT;
+    }
+    else {
+      next if (-l $file);
+      next if (! -e $file);
+      if ($test) {
+        open T, "<$file" or die "Could not read file \'$file\': $!\n";
+      }
+      else {
+        system("cp", $file, $tmpfile) and die "Could not make copy of \'$file\': $!\n";
+        open T, "<$tmpfile" or die "Could not read file \'$tmpfile\': $!\n";
+        open F, ">$file" or die "Could not write file \'$file\': $!\n";
+      }
+      print STDOUT "$file:\n";
+    }
+        select F;
+    my %matches;
+    while (<T>) {
+      foreach my $regex (@r) {
+        $matches{$regex} += eval $regex;
+      }
+      if ($file eq '-' || !$test) {
+        print;
+      }
+    }
+    if ($file ne '-') {
+      foreach my $regex (keys %matches) {
+        print STDOUT "  \'$regex\'  --- " . $matches{$regex} . " matches\n";
+      }
+    }
+    close T;
+    close F;
+    unlink $tmpfile;
+  }
+}
+else {
+  foreach my $file (@files) {
+    next if (-l $file);
+    next if (! -e $file);
+    if (-d $file) {
+      opendir DIR, $file or die "Could not enter directory $file: $!\n";
+      while (my $entry = readdir(DIR)) {
+	next if (-l   $entry);
+	next if (! -e $entry);
+	next if ($entry eq '.' || $entry eq '..');
+	&rename("$file/$entry");
+      }
+    }
+    else {
+      &rename("$file");
+    }
+  }
+}
+
+sub rename {
+  my $dirent = shift;
+  my $dir    = `dirname "$dirent"`;
+  my $file   = `basename "$dirent"`;
+  chomp $dir;
+  chomp $file;
+
+  local $_ = $file;
+  my $number;
+  foreach my $regex (@m) {
+    $number = eval $regex;
+  }
+
+  if ($test) {
+    print "mv \"$dir/$file\" \"$dir/$_\"\n";
+    return;
+  }
+
+  my $sys = system("mv", "$dir/$file", "$dir/$_");
+
+  if (! $sys) {
+    # system() reverses return codes
+    print "moved $dir/$file => $dir/$_ ($number matches)\n";
+  }
+  else {
+    print "failed to move $dir/$file => $dir/$_\n";
+  }
+}
+
+
+sub gettemp {
+    my($random, @range);
+    @range=('0'..'9','a'..'z','A'..'Z');
+    srand(time||$$);
+    for (0..10) {
+      $random .= $range[rand(int($#range)+1)];
+    }
+    my $tempfile = "/tmp/.subst-" . $random;
+    if (-e $tempfile) {
+      # avoid race conditions!
+      unlink $tempfile;
+    }
+    return $tempfile;
+}
+

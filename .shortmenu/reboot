@@ -1,0 +1,5 @@
+#!/bin/sh
+
+. $HOME/.shortmenu/.functions
+
+zenity --question --text="Reboot?" && finish && sudo shutdown -r now

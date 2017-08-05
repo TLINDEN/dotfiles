@@ -1,0 +1,83 @@
+#!/usr/bin/perl -w
+#
+# login to Hotel Ravel Hotspot
+
+use Data::Dumper;
+use LWP::Simple;
+use strict;
+
+my $conf  = "$ENV{HOME}/.ravel";
+my $reask = 0;
+my $aweek = 604800; # if credentials older than 1 week, re-ask
+my $name  = 'Dein';
+my %cred;
+
+if (! -s $conf) {
+  $reask = 1; # never
+}
+else {
+  my $mtime = (stat($conf))[9];
+  if ($mtime < time - $aweek) {
+    $reask = 1; # older
+  }
+  else {
+    # use current
+    open R, "<$conf" or die "Could not open conf $conf: $!\n";
+    while (<R>) {
+      chomp;
+      next if(/^\s*$/);
+      next if(/^#/);
+      if (/^(user|pass)\s*=\s*(.+)/) {
+	$cred{$1} = $2;
+      }
+    }
+    close R;
+  }
+}
+
+
+if ($reask) {
+  # re-ask
+  print "Enter user: ";
+  my $user = <>;
+  chomp $user;
+  print "Enter pass: ";
+  my $pass = <>;
+  chomp $pass;
+  %cred = (user => $user, pass => $pass);
+
+  open R, ">$conf" or die "Could not open conf $conf: $!\n";
+  print R "#\n# written on " . scalar localtime(time) . "\n";
+  print R "user = $user\npass = $pass\n";
+  close R;
+}
+
+
+sub online {
+  my $info = get("http://1.1.1.1/info");
+  my @lines = split /\n/, $info;
+  foreach (@lines) {
+    if (/^TotalTime\s*=\s*(\d+)/) {
+      my $hh = int($1 / 3600);
+      print "Online: $hh hours left\n";
+    }
+  }
+}
+
+
+my $info = get("http://1.1.1.1/info");
+if ($info !~ /TotalTime/) {
+  # authen
+  my $json = get("http://1.1.1.1/login.cgi?username=$cred{user}&password=$cred{pass}&realname=$name&send=Auth");
+  if ($json =~ /You are on the Internet now/) {
+    online;
+  }
+  else {
+    # error
+    print $json;
+  }
+}
+else {
+  online;
+}
+

@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# executed by xmonad, as xmobar starter, so we do out general x11
+# stuff here and start xmobar in the end
+
+# cleanup just in case
+killall i3status
+killall xscreensaver
+killall nautilus
+killall unclutter
+
+# background
+feh --bg-fill $HOME/.xmonad/forest-wallpaper.jpg 
+
+# security
+xscreensaver -no-splash &
+
+sleep 1
+
+# german keyboard
+setxkbmap de
+
+# for finder at all
+kdeinit4 &
+
+# status bar
+i3status > $HOME/.i3state &
+
+# encrypted fs image
+encfs --ondemand --delaymount --extpass=xaskencfspass --idle=1800 ~/Data/.Tom-Dokumente-Crypt ~/Data/Tom-Dokumente
+
+# hide use mouse cursor after 5 seconds
+unclutter -idle 5 &
+
+# finally become xmobar
+exec /usr/bin/xmobar $*

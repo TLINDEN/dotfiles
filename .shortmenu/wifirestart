@@ -1,0 +1,4 @@
+#!/bin/sh
+sudo $HOME/bin/wlanoff
+sleep 10
+sudo $HOME/bin/wlanon

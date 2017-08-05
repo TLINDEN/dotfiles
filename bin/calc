@@ -1,0 +1,122 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+my $usemem   = 0;
+my $finished = 0;
+my $input    = "";
+my $mem      = 0;
+my $arg      = shift;
+
+sub error;
+
+if ($arg) {
+  if ($arg eq "-v") {
+    print "calc version 0.4\n";
+    exit 1;
+  }
+  elsif($arg eq "-h" || $arg eq "--help") {
+    error();
+    exit 1;
+  }
+  else {
+    $input = $arg;
+  }
+}
+
+$| = 1;
+
+while(!$finished) {
+  print "> ";
+  if($input eq "") {
+    $input = <STDIN>;
+  }
+  else{
+    $finished = -1;
+  }
+  chomp ($input);
+
+  if($input =~ /^([\-|\+]?\d*[,\.]?\d*)\s*(\^|%|q|\+|\-|\*|\/)\s*([\-|\+]?\d*[,\.]?\d*)$/) {
+    my $left   = $1;
+    my $center = $2;
+    my $right  = $3;
+    $left   =~ s/,/./;
+    $right  =~ s/,/./;
+
+    if(! $left) {
+      $usemem = 1;
+      $left = $mem;
+    }
+    if($right eq "") {
+      $right = $mem;
+      $usemem = 2;
+    }
+
+    my ($res, $op) = docalc($left, $center, $right);
+
+    $mem = $res;
+    if($usemem == 1) {
+      $left = "(" . $left . ")";
+      $usemem = 0;
+    }
+    elsif($usemem == 2) {
+      $right = "(" . $right . ")";
+      $usemem = 0;
+    }
+    print "$left $op $right = $res\n" if($res);
+    $input = "";
+  }
+  elsif($input =~ /^(\.|\^D)/) {
+    $finished = -1;
+  }
+  else {
+    error("parser error!");
+    $input = "";
+  }
+}
+exit 0;
+
+sub error {
+  my $msg = shift;
+  print "$msg\n" if($msg);
+  print "usage: [operand1] operator operand2\n";
+  print "supported operators: * + - / % ^\n";
+  print "a or ctrl-c quits the program.\n";
+  return (0,"");
+}
+
+sub docalc {
+  my ($left, $center, $right) = @_;
+
+  my ($res, $op);
+
+  if($center eq "+") {
+    $res = $left + $right; $op = "+";
+  }
+  elsif($center eq "-") {
+    $res = $left - $right; $op = "-";
+  }
+  elsif($center eq "*") {
+    $res = $left * $right; $op = "*";
+  }
+  elsif($center eq "^") {
+    $res = $left ** $right; $op = "hoch";
+  }
+  elsif($center eq "%") {
+    $res = $left * $right / 100; $op = "% von";
+  }
+  elsif($center eq "q") {
+    print "done.\n";
+    exit 0;
+  }
+  elsif($center eq "/") {
+    if($right != 0) {
+      $res = $left / $right;
+    }
+    else {
+      return error("error! division by zero!");
+    }
+    $op = "/";
+  }
+  return ($res, $op);
+}

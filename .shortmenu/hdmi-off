@@ -1,0 +1,12 @@
+#!/bin/sh
+
+NOTEBOOK=eDP1
+MONITOR=HDMI1
+MODE=1920x1080
+
+if xrandr -q | grep "$MONITOR" > /dev/null 2>&1; then
+    xrandr --output $NOTEBOOK --mode $MODE
+    sleep 5
+    xrandr --output $MONITOR --off
+fi
+

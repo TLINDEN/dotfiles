@@ -1,0 +1,12 @@
+#!/bin/sh
+
+scriptdir="$HOME/.shortmenu"
+
+dm='dmenu -nb #000000 -nf #FFFFFF'
+
+
+exe=`ls -1 $scriptdir | $dm`
+
+if test -n "$exe"; then
+    eval "exec $scriptdir/$exe"
+fi

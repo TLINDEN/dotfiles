@@ -1,0 +1,5 @@
+#!/bin/sh
+
+cfg="$HOME/.xmonad/xmonad.hs"
+keys=`grep key: $cfg | sed -e 's/-- //' -e 's/$/<br>/'`
+kdialog --msgbox "<font color=black>Xmonad Keys based on $cfg:</font><br><br><font color=darkblue face=monospace>$keys</font>"

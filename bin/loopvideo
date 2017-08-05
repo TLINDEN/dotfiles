@@ -1,0 +1,98 @@
+#!/bin/sh
+
+# flags
+autoplay=""
+loop=""
+edit=""
+
+# config
+bold=$(tput bold)
+normal=$(tput sgr0)
+novid="-vo null"
+mp="mplayer"
+
+pb() {
+    echo -n "${bold}$*${normal}"
+}
+
+edvid() {
+    V=$1
+    if test -n "$edit"; then
+        pb "Keep $V [Yn]? "
+        read yesno
+        if test -n "$yesno"; then
+            if test "$yesno" = "n"; then
+                rm $V
+            fi
+        fi
+    fi
+}
+
+
+case $1 in
+    -h)
+        cat <<EOF
+Play Videos or Audios in a loop.
+
+Usage: $0 [-hale] file ...
+
+Options:
+
+-a  automatically play all files, otherwise ask before playing.
+-l  play all files endlessly, implies -a.
+-e  edit mode, ask to delete or keep
+-h  print help.
+
+EOF
+        exit
+        ;;
+    -a)
+        autoplay=1
+        shift
+        ;;
+    -l)
+        autoplay=1
+        loop=1
+        shift
+        ;;
+    -e)
+        edit=1
+        shift
+        ;;
+esac
+
+# $0 called as loopaudio, omit video output, if any
+if echo $0 | grep audio > /dev/null 2>&1; then
+    mp="$mp $novid"
+fi
+
+while :; do
+    for V in $*; do
+        clear
+        pb "`ls -l $V`"; echo
+        
+        if test -n "$autoplay"; then
+            $mp $V
+        else
+            # interactive
+            pb "Wanna play? [Ynqr]? "
+            read yesno
+            if test -n "$yesno"; then
+                if test "$yesno" = "y"; then
+                    # play requested
+                    $mp $V
+                    edvid $V
+                elif test "$yesno" = "q"; then
+                    exit
+                fi
+            else
+                # default: play
+                $mp $V
+                edvid $V
+            fi
+        fi
+    done
+    if test -z "$loop"; then
+        exit
+    fi
+done

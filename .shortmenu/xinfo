@@ -1,0 +1,5 @@
+#!/bin/sh
+geom=`xprop | grep _NET_WM_OPAQUE_REGION | cut -d= -f2`
+
+zenity --info --text "Window GEOM: $geom"
+

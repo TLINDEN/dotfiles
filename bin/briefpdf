@@ -1,0 +1,80 @@
+#!/usr/bin/perl
+
+my $tex   = shift;
+my $shell = shift;
+my $VL    = ".briefvorlage.tex";
+my $tpl   = "$ENV{HOME}/${VL}";
+my $tmp   = "$ENV{HOME}/tmp/texbuild";
+my @log   = ($tex);
+
+my $pdf = $tex;
+$pdf =~ s/\.tex$/.pdf/;
+
+my $texfile = $tex;
+$texfile =~ s/.*\///;
+
+my $pdffile = $pdf;
+$pdffile =~ s/.*\///;
+
+my $logfile = $pdffile;
+$logfile =~ s/\.pdf$/.log/;
+
+if (!-e $tex) {
+  print STDERR "Error: tex file $tex doesn't exist!\n";
+  exit 1;
+}
+
+if (-e $VL) {
+  $tpl = $VL;
+}
+
+open TEX, "<$tex";
+my $latex = join '', <TEX>;
+close TEX;
+
+&ex("mkdir -p $tmp");
+
+if ($latex =~ /\\documentclass/s) {
+  &ex("cp \"$tex\" $tmp/");
+  &ex("cd $tmp && echo | pdflatex \"$texfile\"");
+  &ex("cp \"$tmp/$pdffile\" \"$pdf\"");
+}
+else {
+  system("cp $tpl \"$tmp/$texfile\"");
+  system("cp \"$tex\" $tmp/brief.tex");
+  &ex("cd $tmp && echo | pdflatex \"$texfile\"");
+  if (-e "$tmp/$pdffile") {
+    push @log, "$pdf created anyway.\n";
+    system("cp \"$tmp/$pdffile\" \"$pdf\"");
+  }
+}
+
+system("rm -rf $tmp/*");
+
+if ($shell) {
+  print "@log\n";
+}
+else {
+  &kout;
+}
+
+sub kout {
+  #my @KDIALOGCALL = ("zenity", "--info", "--text=\"", join( "\n", @log), "\"");
+  #my @KDIALOGCALL = ("zenity", "--info", "--text=\"@log\"");
+  #print "<<<@KDIALOGALL>>>\n";
+  #system @KDIALOGCALL;
+}
+
+sub ex {
+  my $cmd = shift;
+  push @log, "$cmd";
+  if ( system("$cmd") ) {
+    if (open LOG, "<$tmp/$logfile") {
+      my $log = join '', <LOG>;
+      push @log, $log;
+      close $log;
+    }
+    push @log, "Failed to execute $cmd! - Retry in the shell: $0 $tex!\n";
+    &kout;
+  }
+}

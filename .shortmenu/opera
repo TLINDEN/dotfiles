@@ -1,0 +1,14 @@
+#!/bin/sh
+#
+# jailed opera!
+#
+# config in /etc/firejail/opera.profile
+#
+# if syscalls are denied (ie opera crashes or hangs),
+# look in dmesg | grep opera. look for syscall=255.
+# resolve it with firejail --debug-syscalls | grep 255
+# and add it to the config.
+#
+# jail directory is ~/Browser
+rm -rf ~/Browser/.adobe ~/Browser/.macromedia
+exec firejail opera

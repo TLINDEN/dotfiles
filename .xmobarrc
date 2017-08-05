@@ -1,0 +1,15 @@
+-- -*-haskell-*-
+
+Config { font = "-*-Fixed-Bold-R-Normal-*-13-*-*-*-*-*-*-*"
+       , bgColor = "black"
+       , fgColor = "grey"
+       --, position = BottomW L 90
+       , position = Bottom
+       , commands = [ Run Weather "EDDF" ["-t"," <tempC>°C","-L","64","-H","77","--normal","green","--high","red","--low","lightblue"] 36000
+                    , Run Com "i3status.sh" ["l"] "i3" 5
+                    , Run StdinReader
+                    ]
+       , sepChar = "%"
+       , alignSep = "}{"
+       , template = "%StdinReader% }{     %EDDF% | %i3% " 
+       }

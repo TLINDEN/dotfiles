@@ -1,0 +1,165 @@
+# -*-sh-*-
+#
+# Toms screen config.
+# Last update: So 12. Jun 15:58:41 CEST 2016(matches new .inputrc from .portable $20140715.01 and newer)
+
+# ask for password when detaching
+password **************
+
+# status bar look (current window inverted)
+caption always "    %{-}%-w%{= .gW}%50>[ %n-%t ]%{-}%+w  %< %= [%H][%d.%m.%Y %c]"
+
+# we don't wuff
+vbell_msg " *"
+
+# scrollbuffer
+defscrollback 10000
+
+# show activity
+activity "active: %n (%t) [%w:%s]"
+
+# bug me not
+startup_message off
+
+# Window numbering starts at 1, not 0.
+screen -t bash 1 bash
+bind c screen 1
+
+# where hardcopies (screenshot) are landing (taken using CTRL-A h)
+hardcopydir .screen
+
+# hide messages after 3 seconds
+msgwait 3
+
+# make search case-insensitive (copy mode)
+ignorecase on
+
+# change window using CTRL-left/right keys
+bindkey "^[Od" prev  # change window with ctrl-left
+bindkey "^[Oc" next  # change window with ctrl-right
+bindkey "^[[1;5D" prev  # change window with ctrl-left
+bindkey "^[[1;5C" next  # change window with ctrl-right
+
+# ALT-n and CTRL-t rename current screen window
+bindkey "^[n" colon "title "
+bindkey "^t"  colon "title "
+
+# ALT-$number switch to window $number
+bindkey "^[1"  select 1
+bindkey "^[2"  select 2
+bindkey "^[3"  select 3
+bindkey "^[4"  select 4
+bindkey "^[5"  select 5
+bindkey "^[6"  select 6
+bindkey "^[7"  select 7
+bindkey "^[8"  select 8
+bindkey "^[9"  select 9
+bindkey "^[10" select 10
+
+# ALT-x shows screen command prompt (just like emacs)
+bindkey "^[x" colon
+
+# ALT-e executes a shell command
+bindkey "^[e" colon "exec "
+
+# ALT-c enter copy mode (feels like less)
+bindkey "^[c" copy
+
+# ALT-y paste current copy buffer, if any
+bindkey "^y" paste .
+
+# Copymode emacslike: End: CTRL-e, Finish: CTRL-g
+markkeys $=^E:\033=\015=^G
+
+# Copymode: CTRL-w copies marked buffer
+bindkey -m \033w eval "stuff ' '" "stuff '^G'"
+
+# ALT-b display window list
+bindkey "^[b" windowlist -b
+
+# CTRL-n start new window
+bindkey "^n" screen 1
+
+# ALT-s split screen
+bindkey "^[s" split
+
+# ALT-o switch between splitted sreens
+bindkey "^[o" focus
+
+# ALT-q turn off splits
+bindkey "^[q" only
+
+# ALT-+ increase split pane size
+bindkey "^[+" resize +1
+
+# ALT-+ decrease split pane size
+bindkey "^[-" resize -1
+
+# CTRL-h show the bindings help (extracts the following comments)
+bindkey "^h" exec sh -c "grep HELP .screenrc | grep -v bindkey | sed 's/# HELP//g'"
+
+# CTRL-h help string:
+# HELP
+# HELP
+# HELP
+# HELP 
+# HELP -------------[ custom screen help ]-------------
+# HELP
+# HELP HELPERS:
+# HELP    ALT   x            prompt for screen command
+# HELP    ALT   e            prompt for shell command
+# HELP    CTRL  h            show this help
+# HELP 
+# HELP WINDOWS:
+# HELP    CTRL  n            start new screen window
+# HELP    ALT   n            prompt for new window name
+# HELP 
+# HELP WINDOW NAVIGATION:
+# HELP    CTRL  left         previous window
+# HELP    CTRL  right        next window
+# HELP    ALT   b            show windowlist
+# HELP    ALT   1-0          switch to window $number
+# HELP                       0 = 10
+# HELP 
+# HELP COPY MODE:
+# HELP    ALT   c            enter copy mode
+# HELP    CTRL  g            leave copy mode
+# HELP          SPACE        set/end mark
+# HELP    ALT   w            end mark, copy, leave
+# HELP    
+# HELP SPLIT WINDOWS:
+# HELP    ALT   s            split window into 2 panes
+# HELP    ALT   o            switch focus between panes
+# HELP    ALT   q            turn off all split panes
+# HELP    ALT   +            increase split pane size
+# HELP    ALT   -            decrease split pane size
+# HELP
+# HELP ------------------------------------------------
+# HELP
+# HELP
+# HELP
+# HELP
+
+
+# Just for the record:
+# bash function to place into .bashrc. If you run ssh
+# to somewhere the current screen window title will
+# be named after the hostname. -l user and domain part
+# of the hostname will be removed. When the session ends,
+# the current hostname as of hostname -s will be used.
+#
+# ssh () {
+#    if test "$TERM" == "screen"; then
+#	args="$*"
+#	hostname=`echo "$args" | sed -e 's/-l [a-zA-Z0-9]*//g' -e 's/ //g' -e 's/\..*//'`
+#	screen -X title $hostname
+#	/usr/bin/ssh $args
+#	screen -X title `hostname -s`
+#    else
+#	$*
+#    fi
+# }
+
+# enable utf8 support
+utf8 on on
+defutf8 on
