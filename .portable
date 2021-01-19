@@ -1226,6 +1226,7 @@ m4atomp3() {
     else
         outfile=$(echo "$infile" | sed 's/\.m4a$/.mp3/')
         ffmpeg -i "$infile" -vn -ab 128k -ar 44100 -y "$outfile"
+        echo "$outfile successfully written."
     fi
 }
 
